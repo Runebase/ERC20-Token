@@ -1793,40 +1793,52 @@ pragma solidity ^0.6.0;
  * @dev Implementation of the BaseToken
  */
 contract BaseToken is ERC20Capped, ERC20Burnable, ERC1363, Roles, TokenRecover {
-
-    // indicates if minting is finished
     bool private _mintingFinished = false;
-
-    // indicates if transfer is enabled
     bool private _transferEnabled = false;
+    bool private _freezingEnabled = false;
 
-    /**
-     * @dev Emitted during finish minting
-     */
+    mapping(address => bool) private _frozen;
+
     event MintFinished();
-
-    /**
-     * @dev Emitted during transfer enabling
-     */
     event TransferEnabled();
+    event FreezingEnabled(address indexed freezer, bool enabled);
+    event Frozen(address indexed target, bool frozen);
 
-    /**
-     * @dev Tokens can be minted only before minting finished.
-     */
     modifier canMint() {
         require(!_mintingFinished, "BaseToken: minting is finished");
         _;
     }
 
-    /**
-     * @dev Tokens can be moved only after if transfer enabled or if you are an approved operator.
-     */
     modifier canTransfer(address from) {
         require(
             _transferEnabled || hasRole(OPERATOR_ROLE, from),
             "BaseToken: transfer is not enabled or from does not have the OPERATOR role"
         );
+        require(!_freezingEnabled || !_frozen[from], "BaseToken: sender is frozen");
         _;
+    }
+
+    function enableFreezing() public onlyOwner {
+        _freezingEnabled = true;
+        emit FreezingEnabled(_msgSender(), true);
+    }
+
+    function disableFreezing() public onlyOwner {
+        _freezingEnabled = false;
+        emit FreezingEnabled(_msgSender(), false);
+    }
+
+    function freezeAddress(address target) public onlyOwner {
+        require(_freezingEnabled, "BaseToken: freezing is not enabled");
+        require(target != address(0), "BaseToken: target address cannot be zero");
+        _frozen[target] = true;
+        emit Frozen(target, true);
+    }
+
+    function unfreezeAddress(address target) public onlyOwner {
+        require(target != address(0), "BaseToken: target address cannot be zero");
+        _frozen[target] = false;
+        emit Frozen(target, false);
     }
 
     /**
@@ -1851,10 +1863,7 @@ contract BaseToken is ERC20Capped, ERC20Burnable, ERC1363, Roles, TokenRecover {
         ERC20Capped(cap)
         ERC1363(name, symbol)
     {
-        (
-            mintingFinished == false || cap == initialSupply,
-            "BaseToken: if finish minting, cap must be equal to initialSupply"
-        );
+        (mintingFinished == false || cap == initialSupply, "BaseToken: if finish minting, cap must be equal to initialSupply");
 
         _setupDecimals(decimals);
 
@@ -1871,71 +1880,40 @@ contract BaseToken is ERC20Capped, ERC20Burnable, ERC1363, Roles, TokenRecover {
         }
     }
 
-    /**
-     * @return if minting is finished or not.
-     */
     function mintingFinished() public view returns (bool) {
         return _mintingFinished;
     }
 
-    /**
-     * @return if transfer is enabled or not.
-     */
     function transferEnabled() public view returns (bool) {
         return _transferEnabled;
     }
 
-    /**
-     * @dev Function to mint tokens.
-     * @param to The address that will receive the minted tokens
-     * @param value The amount of tokens to mint
-     */
+    function freezingEnabled() public view returns (bool) {
+        return _freezingEnabled;
+    }
+
     function mint(address to, uint256 value) public canMint onlyMinter {
         _mint(to, value);
     }
 
-    /**
-     * @dev Transfer tokens to a specified address.
-     * @param to The address to transfer to
-     * @param value The amount to be transferred
-     * @return A boolean that indicates if the operation was successful.
-     */
     function transfer(address to, uint256 value) public virtual override(ERC20) canTransfer(_msgSender()) returns (bool) {
         return super.transfer(to, value);
     }
 
-    /**
-     * @dev Transfer tokens from one address to another.
-     * @param from The address which you want to send tokens from
-     * @param to The address which you want to transfer to
-     * @param value the amount of tokens to be transferred
-     * @return A boolean that indicates if the operation was successful.
-     */
     function transferFrom(address from, address to, uint256 value) public virtual override(ERC20) canTransfer(from) returns (bool) {
         return super.transferFrom(from, to, value);
     }
 
-    /**
-     * @dev Function to stop minting new tokens.
-     */
     function finishMinting() public canMint onlyOwner {
         _mintingFinished = true;
-
         emit MintFinished();
     }
 
-    /**
-     * @dev Function to enable transfers.
-     */
     function enableTransfer() public onlyOwner {
         _transferEnabled = true;
-
         emit TransferEnabled();
     }
 
-    /**
-     * @dev See {ERC20-_beforeTokenTransfer}.
-     */
     function _beforeTokenTransfer(address from, address to, uint256 amount) internal virtual override(ERC20, ERC20Capped) {
         super._beforeTokenTransfer(from, to, amount);
     }
